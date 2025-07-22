@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini AI Text, Audio & Image Generator</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 25px;
+        }
+        textarea {
+            width: calc(100% - 20px);
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+            resize: vertical;
+            min-height: 80px;
+        }
+        .button-group {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap; /* Izinkan tombol wrap jika layar kecil */
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 17px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button#recordBtn { background-color: #007bff; }
+        button#recordBtn:hover { background-color: #0056b3; }
+        button#stopRecordBtn {
+            background-color: #dc3545;
+            display: none;
+        }
+        button#stopRecordBtn:hover { background-color: #c82333; }
+
+        input[type="file"] {
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 8px;
+            width: calc(100% - 20px);
+        }
+
+        #recordingStatus {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+            display: none;
+        }
+        #output {
+            margin-top: 25px;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            text-align: left;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        #loading {
+            margin-top: 15px;
+            font-style: italic;
+            color: #666;
+            display: none;
+        }
+        .error-message {
+            color: red;
+            margin-top: 10px;
+        }
+        #imagePreview {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            display: none; /* Sembunyikan secara default */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gemini AI Text, Audio & Image Generator</h1>
+        
+        <textarea id="promptInput" placeholder="Masukkan prompt teks atau pertanyaan terkait audio/gambar di sini... (Opsional jika hanya multimedia)"></textarea>
+        
+        <div class="button-group">
+            <button id="generateTextBtn">Generate Text (dari Prompt)</button>
+            <button id="recordBtn">Mulai Rekam Audio</button>
+            <button id="stopRecordBtn">Berhenti & Proses Audio</button>
+        </div>
+
+        <input type="file" id="imageInput" accept="image/*">
+        <img id="imagePreview" alt="Image Preview">
+        <button id="sendImageBtn">Proses Gambar</button>
+        
+        <div id="recordingStatus"></div>
+        <div id="loading">Memproses... Mohon tunggu.</div>
+        <div id="output"></div>
+        <div id="errorMessage" class="error-message"></div>
+    </div>
+
+    <script>
+        const promptInput = document.getElementById('promptInput');
+        const generateTextBtn = document.getElementById('generateTextBtn');
+        const recordBtn = document.getElementById('recordBtn');
+        const stopRecordBtn = document.getElementById('stopRecordBtn');
+        const imageInput = document.getElementById('imageInput');
+        const imagePreview = document.getElementById('imagePreview');
+        const sendImageBtn = document.getElementById('sendImageBtn');
+        const outputDiv = document.getElementById('output');
+        const loadingDiv = document.getElementById('loading');
+        const errorMessageDiv = document.getElementById('errorMessage');
+        const recordingStatusDiv = document.getElementById('recordingStatus');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBlob;
+
+        // --- Fungsi Helper untuk Reset Tampilan ---
+        function resetUI() {
+            outputDiv.textContent = '';
+            errorMessageDiv.textContent = '';
+            loadingDiv.style.display = 'none';
+        }
+
+        // --- Event Listener untuk Generate Teks ---
+        generateTextBtn.addEventListener('click', async () => {
+            resetUI();
+            const prompt = promptInput.value.trim();
+            if (!prompt) {
+                errorMessageDiv.textContent = 'Prompt teks tidak boleh kosong!';
+                return;
+            }
+
+            loadingDiv.style.display = 'block';
+
+            try {
+                const response = await fetch('http://localhost:3000/generate-text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                outputDiv.textContent = data.output;
+            } catch (error) {
+                console.error('Error fetching data (text):', error);
+                errorMessageDiv.textContent = `Gagal mendapatkan respons: ${error.message}`;
+                outputDiv.textContent = 'Terjadi kesalahan saat memproses permintaan teks Anda.';
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
+        });
+
+        // --- Logic Rekam Audio ---
+        recordBtn.addEventListener('click', async () => {
+            resetUI();
+            audioChunks = [];
+            audioBlob = null;
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    sendAudioToAPI(audioBlob);
+                    stream.getTracks().forEach(track => track.stop()); 
+                };
+
+                mediaRecorder.start();
+                recordingStatusDiv.textContent = 'Merekam...';
+                recordingStatusDiv.style.display = 'block';
+                recordBtn.style.display = 'none';
+                stopRecordBtn.style.display = 'inline-block';
+                imageInput.disabled = true; // Nonaktifkan input gambar saat merekam
+                sendImageBtn.disabled = true; // Nonaktifkan tombol kirim gambar
+            } catch (err) {
+                console.error('Gagal mengakses mikrofon:', err);
+                errorMessageDiv.textContent = 'Gagal mengakses mikrofon. Pastikan Anda memberikan izin.';
+            }
+        });
+
+        stopRecordBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                recordingStatusDiv.textContent = '';
+                recordingStatusDiv.style.display = 'none';
+                recordBtn.style.display = 'inline-block';
+                stopRecordBtn.style.display = 'none';
+                imageInput.disabled = false; // Aktifkan kembali
+                sendImageBtn.disabled = false; // Aktifkan kembali
+            }
+        });
+
+        // --- Fungsi untuk Mengirim Audio ke API ---
+        async function sendAudioToAPI(blob) {
+            resetUI();
+            loadingDiv.style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('audioFile', blob, 'recording.webm');
+            const prompt = promptInput.value.trim();
+            if (prompt) {
+                formData.append('prompt', prompt);
+            }
+
+            try {
+                const response = await fetch('http://localhost:3000/generate-audio-text', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                outputDiv.textContent = data.output;
+            } catch (error) {
+                console.error('Error fetching data (audio):', error);
+                errorMessageDiv.textContent = `Gagal memproses audio: ${error.message}`;
+                outputDiv.textContent = 'Terjadi kesalahan saat memproses audio Anda.';
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
+        }
+
+        // --- Logic Input Gambar ---
+        imageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreview.style.display = 'block'; // Tampilkan preview gambar
+                };
+                reader.readAsDataURL(file);
+            } else {
+                imagePreview.src = '';
+                imagePreview.style.display = 'none';
+            }
+        });
+
+        sendImageBtn.addEventListener('click', async () => {
+            resetUI();
+            const imageFile = imageInput.files[0];
+
+            if (!imageFile) {
+                errorMessageDiv.textContent = 'Silakan pilih file gambar terlebih dahulu!';
+                return;
+            }
+
+            loadingDiv.style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('imageFile', imageFile); // 'imageFile' harus sesuai dengan nama field di Multer
+            const prompt = promptInput.value.trim();
+            if (prompt) {
+                formData.append('prompt', prompt); // Tambahkan prompt teks jika ada
+            }
+
+            try {
+                const response = await fetch('http://localhost:3000/generate-image-text', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                outputDiv.textContent = data.output;
+            } catch (error) {
+                console.error('Error fetching data (image):', error);
+                errorMessageDiv.textContent = `Gagal memproses gambar: ${error.message}`;
+                outputDiv.textContent = 'Terjadi kesalahan saat memproses gambar Anda.';
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
